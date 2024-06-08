@@ -20,7 +20,7 @@ Before you begin, ensure you have met the following requirements:
 1. Clone this repository:
 
    ```bash
-   git clone https://github.com/germanProgq/shorts-to-reels.git
+   git clone https://github.com/germanProgq/Shorts-To-Reels.git
    cd shorts-to-reels
    ```
 
