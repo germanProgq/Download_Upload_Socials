@@ -47,7 +47,7 @@ Before you begin, ensure you have met the following requirements:
 2. Run the script:
 
    ```bash
-   python script.py
+   python main.py
    ```
 
    The script will:
