@@ -7,7 +7,7 @@ import tempfile
 from PIL import Image
 
 # Define constants
-DOWNLOAD_PATH = 'videos'
+DOWNLOAD_PATH = 'your_download_folder' | 'videos'
 INSTAGRAM_USERNAME = 'your_ig_user'
 INSTAGRAM_PASSWORD = 'your_ig_pass'
 
@@ -45,23 +45,25 @@ def download_youtube_video(video_url, output_path):
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         ydl.download([video_url])
 
-def adjust_aspect_ratio(video_path, target_width=1080, target_aspect_ratio=0.5625):
+def adjust_aspect_ratio(video_path, target_width=1080, target_height=1920):
     clip = VideoFileClip(video_path)
     width, height = clip.size
-    aspect_ratio = width / height
+    target_aspect_ratio = target_width / target_height
 
-    if aspect_ratio > target_aspect_ratio:  # Video is wider than target
+    # Crop video to the target aspect ratio
+    if width / height > target_aspect_ratio:  # Video is wider than target
         new_width = int(height * target_aspect_ratio)
         x1 = (width - new_width) // 2
         x2 = x1 + new_width
         clip = clip.crop(x1=x1, x2=x2)
-    elif aspect_ratio < target_aspect_ratio:  # Video is taller than target
+    elif width / height < target_aspect_ratio:  # Video is taller than target
         new_height = int(width / target_aspect_ratio)
         y1 = (height - new_height) // 2
         y2 = y1 + new_height
         clip = clip.crop(y1=y1, y2=y2)
 
-    clip_resized = clip.resize(width=target_width)
+    # Resize to the target resolution
+    clip_resized = clip.resize(newsize=(target_width, target_height))
     output_path = tempfile.mktemp(suffix='.mp4')
     clip_resized.write_videofile(output_path, codec='libx264', audio_codec='aac')
 
@@ -88,10 +90,11 @@ def post_to_instagram(api, video_path, caption):
         video_data = video_file.read()
         thumbnail_data = thumb_file.read()
 
-    api.post_video(video_data, size=(width, height), duration=duration, thumbnail_data=thumbnail_data, caption=caption)
+    # Use ClientCompatPatch to post as a Reel (IGTV/Story)
+    api.post_video(video_data, size=(width, height), duration=duration, thumbnail_data=thumbnail_data, caption=caption, to_reel=True)
 
 def main():
-    query = 'memes'
+    query = 'your_category'
     max_videos = 5
     youtube_videos = get_youtube_shorts(query, max_videos)
 
@@ -112,7 +115,7 @@ def main():
             print(f"Failed to download {video_url}: {e}")
             continue
 
-        caption = 'Check out this meme!'
+        caption = 'Your caption'
         try:
             post_to_instagram(api, output_path, caption)
         except ValueError as e:
