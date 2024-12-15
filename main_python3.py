@@ -4,13 +4,13 @@ import requests
 from moviepy.editor import VideoFileClip
 from instagrapi import Client
 import yt_dlp as youtube_dl
-import tempfile
 from PIL import Image
 from dotenv import load_dotenv
 import sys
 import logging
 import ffmpeg
 import time
+import traceback
 
 # Configure logging
 logging.basicConfig(
@@ -210,66 +210,72 @@ def post_to_instagram(client, video_path, caption):
     except Exception as e:
         logger.error(f"Failed to post to Instagram: {e}")
 
+
 def main():
-    if len(sys.argv) != 2:
-        logger.error("Usage: python3 main.py <query>")
-        sys.exit(1)
-    query = sys.argv[1]
-    max_videos = 5
-    youtube_videos = get_youtube_shorts(query, max_videos)
+        if len(sys.argv) != 2:
+            logger.error("Usage: python3 main_python3.py <query>")
+            sys.exit(1)
+        query = sys.argv[1]
+        max_videos = 5
+        youtube_videos = get_youtube_shorts(query, max_videos)
 
-    if not os.path.exists(DOWNLOAD_PATH):
-        os.makedirs(DOWNLOAD_PATH)
+        if not os.path.exists(DOWNLOAD_PATH):
+            os.makedirs(DOWNLOAD_PATH)
 
-    # Initialize Instagram client
-    client = Client()
+        # Initialize Instagram client
+        client = Client()
 
-    try:
-        # Attempt to load a saved session
-        if os.path.exists("session.json"):
-            client.load_settings("session.json")
-            client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-        else:
-            # Fresh login
-            client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            # Save session for future use
-            client.dump_settings("session.json")
-        logger.info("Logged in to Instagram successfully.")
-    except Exception as e:
-        logger.error(f"Login failed: {e}")
-        sys.exit(1)
-
-    downloaded_count = 0
-    for video_url in youtube_videos:
-        if downloaded_count >= max_videos:
-            break
         try:
-            logger.info(f"\nProcessing YouTube Short: {video_url}")
-            output_path = download_youtube_video(video_url)
-            if not output_path:
-                continue  # Skip if download failed
-
-            # Validate the downloaded video
-            if not is_valid_video(output_path):
-                logger.error(f"Downloaded video {output_path} is invalid or corrupted. Re-downloading.")
-                # Attempt to re-download
-                output_path = download_youtube_video(video_url)
-                if not output_path or not is_valid_video(output_path):
-                    logger.error(f"Failed to obtain a valid video for {video_url}. Skipping.")
-                    continue
-
-            # Adjust video aspect ratio using FFmpeg
-            adjusted_video_path = adjust_aspect_ratio_ffmpeg(output_path)
-
-            # Post to Instagram
-            caption = 'Your caption'  # Replace with your desired caption
-            logger.info(f"Posting video to Instagram with caption: '{caption}'")
-            post_to_instagram(client, adjusted_video_path, caption)
-            downloaded_count += 1
+            # Attempt to load a saved session
+            if os.path.exists("session.json"):
+                client.load_settings("session.json")
+                client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            else:
+                # Fresh login
+                client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+                # Save session for future use
+                client.dump_settings("session.json")
+            logger.info("Logged in to Instagram successfully.")
         except Exception as e:
-            logger.error(f"Error processing {video_url}: {e}")
+            logger.error(f"Login failed: {e}")
+            logger.error(traceback.format_exc())
+            sys.exit(1)
 
-    logger.info("\nAll tasks completed.")
+        downloaded_count = 0
+        for video_url in youtube_videos:
+            if downloaded_count >= max_videos:
+                break
+            try:
+                logger.info(f"\nProcessing YouTube Short: {video_url}")
+                output_path = download_youtube_video(video_url)
+                if not output_path:
+                    continue  # Skip if download failed
+
+                # Validate the downloaded video
+                if not is_valid_video(output_path):
+                    logger.error(f"Downloaded video {output_path} is invalid or corrupted. Re-downloading.")
+                    # Attempt to re-download
+                    output_path = download_youtube_video(video_url)
+                    if not output_path or not is_valid_video(output_path):
+                        logger.error(f"Failed to obtain a valid video for {video_url}. Skipping.")
+                        continue
+
+                # Adjust video aspect ratio using FFmpeg
+                adjusted_video_path = adjust_aspect_ratio_ffmpeg(output_path)
+
+                # Post to Instagram
+                caption = 'Your caption'  # Replace with your desired caption
+                logger.info(f"Posting video to Instagram with caption: '{caption}'")
+                post_to_instagram(client, adjusted_video_path, caption)
+                downloaded_count += 1
+            except Exception as e:
+                logger.error(f"Error processing {video_url}: {e}")
+                logger.error(traceback.format_exc())
+
+        logger.info("\nAll tasks completed.")
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
