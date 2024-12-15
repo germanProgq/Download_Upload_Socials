@@ -1,0 +1,6 @@
+google-api-python-client
+google-auth
+instagrapi
+requests
+python-dotenv
+moviepy==1.0.3
