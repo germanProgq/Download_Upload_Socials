@@ -1,4 +1,3 @@
-```markdown
 # Shorts_To_Reels
 
 **Shorts_To_Reels** is a Python-based automation tool designed to seamlessly download YouTube Shorts and upload them as Instagram Reels. By leveraging powerful libraries like `instagrapi`, `yt-dlp`, and `ffmpeg-python`, this tool simplifies the process of curating and sharing short-form video content across platforms.
@@ -65,11 +64,9 @@ Follow these steps to set up **Shorts_To_Reels** on your local machine:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/Shorts_To_Reels.git
+git clone https://github.com/germanProgq/Shorts_To_Reels.git
 cd Shorts_To_Reels
 ```
-
-*Replace `yourusername` with your actual GitHub username if applicable.*
 
 ### 2. Set Up a Virtual Environment
 
