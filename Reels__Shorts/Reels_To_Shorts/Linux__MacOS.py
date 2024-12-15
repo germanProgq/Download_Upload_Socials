@@ -18,8 +18,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
 
 # Constants
 DOWNLOAD_PATH = os.path.join('videos')  # Directory to save downloaded videos
