@@ -1,0 +1,6 @@
+# .gitignore
+venv/
+.env
+*.log
+session.json
+downloads/
