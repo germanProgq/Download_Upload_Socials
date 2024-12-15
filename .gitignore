@@ -4,3 +4,4 @@ venv/
 *.log
 session.json
 downloads/
+.vs/
