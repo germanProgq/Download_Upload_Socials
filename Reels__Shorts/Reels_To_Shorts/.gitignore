@@ -1,0 +1,9 @@
+# gitignore
+videos/
+token/
+venv/
+token.json
+.env
+__pycache__/
+session.json
+app.log
