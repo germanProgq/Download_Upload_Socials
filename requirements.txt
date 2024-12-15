@@ -10,7 +10,7 @@ imageio==2.36.1
 imageio-ffmpeg==0.5.1
 instagram-private-api==1.6.0.0
 instagrapi==2.1.3
-moviepy==2.1.1
+moviepy==1.0.3
 numpy==2.2.0
 pillow==10.4.0
 proglog==0.1.10
