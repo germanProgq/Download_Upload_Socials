@@ -56,27 +56,17 @@ def download_instagram_video(client, media_id, download_path=DOWNLOAD_PATH):
         logger.error(f"Failed to download video for media ID {media_id}: {e}")
         return None
 
-
 def process_query(client, query):
     """
     Processes a single query: fetches, downloads, and uploads videos.
     """
     logger.info(f"Processing query: {query}")
 
-    # Fetch videos based on the query
     try:
-        results = client.search_tags(query)
-        if not results:
-            logger.warning(f"No results found for query: {query}")
-            return
-
-        tag_id = results[0].pk
-        logger.info(f"Fetching reels for tag ID {tag_id}...")
-
-        # Fetch reels for the tag
-        reels = client.tag_reels(tag_id, amount=10)  # Limit to 10 reels
+        # Fetch recent media for the tag
+        reels = client.tag_medias_recent(query, amount=10)  # Limit to 10 reels
         if not reels:
-            logger.warning(f"No reels found for tag ID {tag_id}")
+            logger.warning(f"No reels found for query: {query}")
             return
 
         logger.info(f"Found {len(reels)} reels for query: {query}")
