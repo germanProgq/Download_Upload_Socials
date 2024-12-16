@@ -1,9 +1,9 @@
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow
 import json
 
 def generate_token(client_secrets_file, token_file="token.json"):
     """
-    Run the OAuth 2.0 flow to authenticate and generate a persistent token file.
+    Perform manual OAuth 2.0 flow for headless environments without launching a browser.
 
     Args:
         client_secrets_file (str): Path to the client secrets JSON file.
@@ -13,13 +13,26 @@ def generate_token(client_secrets_file, token_file="token.json"):
     scopes = ["https://www.googleapis.com/auth/youtube.upload"]
 
     # Initialize the OAuth flow
-    flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, scopes=scopes)
-    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+    flow = Flow.from_client_secrets_file(client_secrets_file, scopes=scopes)
+    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"  # Set redirect URI for manual authentication
 
-    # Run local server for authentication
-    credentials = flow.run_local_server(port=0)
+    # Generate the authorization URL
+    auth_url, _ = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
+    )
 
-    # Save the credentials to a JSON file
+    # Provide the URL for manual authentication
+    print(f"Please go to the following URL to authorize this application:\n{auth_url}")
+
+    # Ask the user to paste the authorization code
+    auth_code = input("Enter the authorization code: ")
+
+    # Exchange the authorization code for credentials
+    flow.fetch_token(code=auth_code)
+
+    # Save the credentials to a file
+    credentials = flow.credentials
     with open(token_file, "w") as token:
         token.write(credentials.to_json())
         print(f"Token saved to {token_file.name}")
