@@ -1,4 +1,5 @@
 from google_auth_oauthlib.flow import InstalledAppFlow
+import json
 
 def generate_token(client_secrets_file, token_file="token.json"):
     """
@@ -11,18 +12,14 @@ def generate_token(client_secrets_file, token_file="token.json"):
     # Define the required scopes for YouTube
     scopes = ["https://www.googleapis.com/auth/youtube.upload"]
 
-    # Run OAuth flow
-    flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, scopes)
-    auth_url, _ = flow.authorization_url(prompt='consent')
+    # Initialize the OAuth flow
+    flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, scopes=scopes)
+    flow.redirect_uri = "http://localhost"  # Use localhost for redirect
 
-    # Print the URL for manual authentication
-    print(f"Please go to this URL and authorize access: {auth_url}")
-
-    # Ask the user to input the authorization code
-    auth_code = input("Enter the authorization code: ")
-    credentials = flow.fetch_token(code=auth_code)
+    # Run local server for authentication
+    credentials = flow.run_local_server(port=0)
 
     # Save the credentials to a JSON file
     with open(token_file, "w") as token:
         token.write(credentials.to_json())
-        print(f"Token saved to {token_file}")
+        print(f"Token saved to {token_file.name}")
