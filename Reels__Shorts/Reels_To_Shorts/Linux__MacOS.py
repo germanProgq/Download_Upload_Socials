@@ -6,6 +6,7 @@ import requests
 from instagrapi import Client
 from dotenv import load_dotenv
 from assets.upload_short import upload_all_videos_in_folder, get_authenticated_service
+from assets.generate_token import generate_token
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +23,8 @@ load_dotenv()
 DOWNLOAD_PATH = os.path.join('downloads')
 INSTAGRAM_USERNAME = os.getenv('INSTAGRAM_USERNAME')
 INSTAGRAM_PASSWORD = os.getenv('INSTAGRAM_PASSWORD')
+CLIENT_SECRETS_FILE = "./assets/token/client_secrets.json"
+TOKEN_FILE = "token.json"
 
 def download_instagram_video(client, media_id, download_path=DOWNLOAD_PATH):
     """
@@ -52,6 +55,7 @@ def download_instagram_video(client, media_id, download_path=DOWNLOAD_PATH):
     except Exception as e:
         logger.error(f"Failed to download video for media ID {media_id}: {e}")
         return None
+
 
 def process_query(client, query):
     """
@@ -84,6 +88,7 @@ def process_query(client, query):
     except Exception as e:
         logger.error(f"Error processing query {query}: {e}")
 
+
 def main():
     # Ensure a download directory exists
     if not os.path.exists(DOWNLOAD_PATH):
@@ -106,13 +111,24 @@ def main():
         logger.error(f"Login failed: {e}")
         sys.exit(1)
 
+    # Check for YouTube token.json file
+    if not os.path.exists(TOKEN_FILE):
+        logger.info(f"{TOKEN_FILE} not found. Generating a new token...")
+        try:
+            generate_token(CLIENT_SECRETS_FILE, TOKEN_FILE)
+            logger.info(f"Token generated and saved to {TOKEN_FILE}.")
+        except Exception as e:
+            logger.error(f"Failed to generate token: {e}")
+            sys.exit(1)
+
     # Get queries from command-line arguments
     queries = sys.argv[1:]
-    if len(queries) != 3:
-        logger.error("You must provide exactly 3 queries as arguments.")
+    if not queries:
+        logger.error("You must provide at least one query as an argument.")
         sys.exit(1)
 
     # Process each query
+    logger.info(f"Processing {len(queries)} queries...")
     for query in queries:
         process_query(client, query)
 
@@ -124,6 +140,7 @@ def main():
         logger.error(f"Error uploading videos to YouTube: {e}")
 
     logger.info("All tasks completed.")
+
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,7 @@
 from google_auth_oauthlib.flow import InstalledAppFlow
 import json
 
-def generate_token(client_secrets_file, token_file="token.json"):
+def generate_token(client_secrets_file ="./assets/token/client_secrets.json", token_file="token.json"):
     """
     Run the OAuth 2.0 flow to authenticate and generate a persistent token file.
 
@@ -20,7 +20,3 @@ def generate_token(client_secrets_file, token_file="token.json"):
     with open(token_file, "w") as token:
         token.write(credentials.to_json())
         print(f"Token saved to {token_file}")
-
-# Replace this with the path to your `client_secrets.json` file
-client_secrets_file = "./assets/token/client_secrets.json"
-generate_token(client_secrets_file)
