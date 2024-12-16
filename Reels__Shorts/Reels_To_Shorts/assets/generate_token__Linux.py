@@ -14,7 +14,7 @@ def generate_token(client_secrets_file, token_file="token.json"):
 
     # Initialize the OAuth flow
     flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, scopes=scopes)
-    flow.redirect_uri = "http://localhost"  # Use localhost for redirect
+    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
 
     # Run local server for authentication
     credentials = flow.run_local_server(port=0)
