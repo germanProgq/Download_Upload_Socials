@@ -7,7 +7,6 @@ from instagrapi import Client
 from dotenv import load_dotenv
 from assets.upload_short import upload_all_videos_in_folder, get_authenticated_service
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -18,9 +17,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+load_dotenv()
 
-# Constants
-DOWNLOAD_PATH = os.path.join('videos')  # Directory to save downloaded videos
+DOWNLOAD_PATH = os.path.join('downloads')
 INSTAGRAM_USERNAME = os.getenv('INSTAGRAM_USERNAME')
 INSTAGRAM_PASSWORD = os.getenv('INSTAGRAM_PASSWORD')
 
