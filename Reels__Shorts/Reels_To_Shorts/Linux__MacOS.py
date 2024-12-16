@@ -6,7 +6,7 @@ import requests
 from instagrapi import Client
 from dotenv import load_dotenv
 from assets.upload_short import upload_all_videos_in_folder, get_authenticated_service
-from assets.generate_token import generate_token
+from assets.generate_token__Linux import generate_token
 
 logging.basicConfig(
     level=logging.INFO,
