@@ -13,7 +13,14 @@ def generate_token(client_secrets_file, token_file="token.json"):
 
     # Run OAuth flow
     flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, scopes)
-    credentials = flow.run_console()  # Use run_console for headless environments
+    auth_url, _ = flow.authorization_url(prompt='consent')
+
+    # Print the URL for manual authentication
+    print(f"Please go to this URL and authorize access: {auth_url}")
+
+    # Ask the user to input the authorization code
+    auth_code = input("Enter the authorization code: ")
+    credentials = flow.fetch_token(code=auth_code)
 
     # Save the credentials to a JSON file
     with open(token_file, "w") as token:
