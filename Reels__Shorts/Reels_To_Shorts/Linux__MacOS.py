@@ -65,7 +65,7 @@ def process_reels(client):
 
     try:
         # Fetch recent reels
-        reels = client.reels_tray()  # Fetch reels from the user's feed
+        reels = client.reels(amount=20)  # Fetch reels from the user's feed
         if not reels:
             logger.warning("No reels found.")
             return
