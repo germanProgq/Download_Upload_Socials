@@ -35,4 +35,4 @@ def generate_token(client_secrets_file, token_file="token.json"):
     credentials = flow.credentials
     with open(token_file, "w") as token:
         token.write(credentials.to_json())
-        print(f"Token saved to {token_file.name}")
+    print(f"Token saved to {token_file}")
