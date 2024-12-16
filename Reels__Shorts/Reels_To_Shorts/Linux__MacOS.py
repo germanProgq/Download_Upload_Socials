@@ -56,27 +56,28 @@ def download_instagram_video(client, media_id, download_path=DOWNLOAD_PATH):
         logger.error(f"Failed to download video for media ID {media_id}: {e}")
         return None
 
-def process_query(client, query):
+
+def process_reels(client):
     """
-    Processes a single query: fetches, downloads, and uploads videos.
+    Processes reels: fetches, downloads, and uploads videos.
     """
-    logger.info(f"Processing query: {query}")
+    logger.info("Processing reels...")
 
     try:
-        # Fetch recent media for the tag
-        reels = client.tag_medias_recent(query, amount=10)  # Limit to 10 reels
+        # Fetch recent reels
+        reels = client.reels_tray()  # Fetch reels from the user's feed
         if not reels:
-            logger.warning(f"No reels found for query: {query}")
+            logger.warning("No reels found.")
             return
 
-        logger.info(f"Found {len(reels)} reels for query: {query}")
+        logger.info(f"Found {len(reels)} reels.")
         for i, reel in enumerate(reels, start=1):
-            logger.info(f"Processing reel {i}/{len(reels)} for query: {query}")
-            download_instagram_video(client, reel.pk)
+            logger.info(f"Processing reel {i}/{len(reels)}...")
+            download_instagram_video(client, reel.id)
             time.sleep(2)  # Wait to avoid rate limits
 
     except Exception as e:
-        logger.error(f"Error processing query {query}: {e}")
+        logger.error(f"Error processing reels: {e}")
 
 
 def main():
@@ -111,16 +112,8 @@ def main():
             logger.error(f"Failed to generate token: {e}")
             sys.exit(1)
 
-    # Get queries from command-line arguments
-    queries = sys.argv[1:]
-    if not queries:
-        logger.error("You must provide at least one query as an argument.")
-        sys.exit(1)
-
-    # Process each query
-    logger.info(f"Processing {len(queries)} queries...")
-    for query in queries:
-        process_query(client, query)
+    # Process reels
+    process_reels(client)
 
     # Authenticate with YouTube and upload videos
     try:
