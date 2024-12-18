@@ -2,7 +2,6 @@ google-api-python-client
 google-auth<4.0.0
 instagrapi
 requests
-google-oauth-lib
 oauth2client<4.0.0
 python-dotenv
 moviepy==1.0.3
