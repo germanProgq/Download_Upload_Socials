@@ -96,11 +96,15 @@ def main():
         else:
             client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
             client.dump_settings("session.json")
+    except instagrapi.exceptions.LoginRequired:
+        logger.error("Session expired. Please log in again.")
+        try:
+            client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
+            client.dump_settings("session.json")
+        except Exception as e:
+            logger.error(f"Re-login failed: {e}")
+            sys.exit(1)
 
-        logger.info("Logged in to Instagram successfully.")
-    except Exception as e:
-        logger.error(f"Login failed: {e}")
-        sys.exit(1)
 
     # Check for YouTube token.json file
     if not os.path.exists(TOKEN_FILE):
