@@ -1,8 +1,0 @@
-google-api-python-client
-google-auth<4.0.0
-instagrapi
-requests
-oauth2client<4.0.0
-python-dotenv
-moviepy==1.0.3
-google_auth_oauthlib

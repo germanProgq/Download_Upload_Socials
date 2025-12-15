@@ -2,6 +2,10 @@ import os
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
+
+# Scopes for upload; must match the token generation scripts.
+UPLOAD_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
 def get_authenticated_service(token_file="token.json"):
     """
@@ -13,10 +17,16 @@ def get_authenticated_service(token_file="token.json"):
     Returns:
         googleapiclient.discovery.Resource: Authenticated YouTube API client.
     """
-    credentials = Credentials.from_authorized_user_file(
-        token_file, scopes=["https://www.googleapis.com/auth/youtube.upload"]
-    )
-    return build("youtube", "v3", credentials=credentials)
+    credentials = Credentials.from_authorized_user_file(token_file, scopes=UPLOAD_SCOPES)
+    if not credentials or not credentials.scopes or UPLOAD_SCOPES[0] not in credentials.scopes:
+        raise RuntimeError(
+            "token.json is missing the youtube.upload scope. Delete token.json, "
+            "rerun the token generator script, and approve the YouTube upload scope."
+        )
+
+    youtube = build("youtube", "v3", credentials=credentials)
+
+    return youtube
 
 def upload_video(youtube, video_file, title, description, category_id=22, privacy_status="public"):
     """
@@ -43,7 +53,21 @@ def upload_video(youtube, video_file, title, description, category_id=22, privac
 
     media = MediaFileUpload(video_file, chunksize=-1, resumable=True)
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-    response = request.execute()
+    try:
+        response = request.execute()
+    except HttpError as e:
+        message = str(e)
+        if e.resp.status == 401 and "youtubeSignupRequired" in message:
+            raise RuntimeError(
+                "Upload unauthorized: the authorized Google account must have an active YouTube channel. "
+                "Create/enable a channel for this account, regenerate token.json with the upload scope, and retry."
+            ) from e
+        if e.resp.status == 403 and "insufficientPermissions" in message:
+            raise RuntimeError(
+                "Upload failed: token.json does not have the youtube.upload scope. "
+                "Delete token.json, regenerate it via the token script (ensure YouTube upload scope is selected), and rerun."
+            ) from e
+        raise
 
     print(f"Video uploaded successfully: https://www.youtube.com/watch?v={response['id']}")
     return response
@@ -68,9 +92,11 @@ def upload_all_videos_in_folder(youtube, folder_path, category_id=22, privacy_st
     for video_file in video_files:
         video_path = os.path.join(folder_path, video_file)
 
-        # Generate a title and description based on the file name
-        title = "Something"
-        description = f"Subscribe and Like!"
+        # Generate a title and description based on the file name with simple tags
+        base_title = os.path.splitext(video_file)[0].replace('_', ' ').strip() or "Short"
+        tags = "#shorts #reels #viral #subscribe"
+        title = f"{base_title} | Shorts"
+        description = f"{base_title}\n\n{tags}"
 
         print(f"Uploading: {video_file}")
         try:

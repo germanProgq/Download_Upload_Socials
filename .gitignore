@@ -1,0 +1,6 @@
+.env
+.pyc
+client_secret*
+.venv/
+venv/
+downloads/

@@ -1,5 +1,4 @@
 from google_auth_oauthlib.flow import InstalledAppFlow
-import json
 
 def generate_token(client_secrets_file ="./assets/token/client_secrets.json", token_file="token.json"):
     """
@@ -20,3 +19,7 @@ def generate_token(client_secrets_file ="./assets/token/client_secrets.json", to
     with open(token_file, "w") as token:
         token.write(credentials.to_json())
         print(f"Token saved to {token_file}")
+
+
+if __name__ == "__main__":
+    generate_token()

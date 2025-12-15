@@ -1,6 +1,6 @@
-# Shorts_To_Reels
+# shorts_to_reels
 
-**Shorts_To_Reels** is a Python-based automation tool designed to seamlessly download YouTube Shorts and upload them as Instagram Reels. By leveraging powerful libraries like `instagrapi`, `yt-dlp`, and `ffmpeg-python`, this tool simplifies the process of curating and sharing short-form video content across platforms.
+**shorts_to_reels** is a Python-based automation tool designed to seamlessly download YouTube Shorts and upload them as Instagram Reels. By leveraging powerful libraries like `instagrapi`, `yt-dlp`, and `ffmpeg-python`, this tool simplifies the process of curating and sharing short-form video content across platforms.
 
 ## Table of Contents
 
@@ -19,6 +19,7 @@
 
 - **Search and Retrieve YouTube Shorts:** Fetches YouTube Shorts based on a specified search query.
 - **Download Videos:** Downloads selected YouTube Shorts in high-quality MP4 format.
+- **Multithreaded Prep Pipeline:** Downloads, validates, and crops multiple videos concurrently for faster end-to-end runs.
 - **Aspect Ratio Adjustment:** Automatically adjusts the video's aspect ratio to 9:16, ideal for Instagram Reels.
 - **Upload to Instagram Reels:** Seamlessly uploads processed videos to Instagram with customizable captions.
 - **Session Management:** Maintains session persistence to avoid repeated logins and enhance security.
@@ -26,7 +27,7 @@
 
 ## Prerequisites
 
-Before setting up **Shorts_To_Reels**, ensure you have the following installed on your system:
+Before setting up **shorts_to_reels**, ensure you have the following installed on your system:
 
 1. **Python:**  
    - Version: **3.10** or higher  
@@ -59,13 +60,13 @@ Before setting up **Shorts_To_Reels**, ensure you have the following installed o
 
 ## Installation
 
-Follow these steps to set up **Shorts_To_Reels** on your local machine:
+Follow these steps to set up **shorts_to_reels** on your local machine:
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/germanProgq/Shorts_To_Reels.git
-cd Shorts_To_Reels
+git clone https://github.com/germanProgq/Download_Upload_Socials.git
+cd Download_Upload_Socials/reels_shorts/shorts_to_reels
 ```
 
 ### 2. Set Up a Virtual Environment
@@ -126,7 +127,7 @@ Ensure that the `.env` file is included in your `.gitignore` to prevent accident
 
 ### 2. Customize Script Settings
 
-Within the `main.py` script, you can adjust the following parameters:
+Within `run_shorts_to_reels.py` you can adjust the following parameters:
 
 - **Search Query:**  
   ```python
@@ -138,6 +139,9 @@ Within the `main.py` script, you can adjust the following parameters:
   max_videos = 5  # Adjust as needed
   ```
 
+- **Thread Pool Size:**  
+  By default the script uses up to 8 worker threads (bounded by your CPU count) to parallelize downloads and preprocessing. If you need to throttle or increase concurrency, adjust `MAX_WORKERS` near the top of `run_shorts_to_reels.py`.
+
 - **Instagram Caption:**  
   ```python
   caption = 'Your caption'  # Replace with your desired caption
@@ -148,7 +152,7 @@ Within the `main.py` script, you can adjust the following parameters:
 Once everything is set up and configured, you can run the script to automate the process of downloading YouTube Shorts and uploading them to Instagram Reels.
 
 ```bash
-python main.py
+python run_shorts_to_reels.py "<search_query>"
 ```
 
 ### **Workflow Overview:**
@@ -261,23 +265,8 @@ Contributions are welcome! Whether you're fixing bugs, improving documentation, 
 2. **Clone Your Fork:**
 
    ```bash
-   git clone https://github.com/germanProgq# No code was selected, so I will provide a general improvement to the existing code.
-
-# Improved code for handling Instagram login issues
-try:
-    # Attempt to log in to Instagram
-    instagram.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-except instagrapi.exceptions.LoginRequired:
-    # Handle 2FA
-    two_fa_code = input("Enter the 2FA code: ")
-    instagram.two_factor_login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD, two_fa_code)
-except instagrapi.exceptions.LoginError:
-    # Handle login errors
-    print("Failed to log in to Instagram. Please check your credentials.")
-    # Delete the existing session.json file to force a fresh login
-    if os.path.exists("session.json"):
-        os.remove("session.json/Shorts_To_Reels.git
-   cd Shorts_To_Reels
+   git clone https://github.com/germanProgq/Download_Upload_Socials.git
+   cd Download_Upload_Socials/reels_shorts/shorts_to_reels
    ```
 
 3. **Create a New Branch:**
@@ -317,7 +306,7 @@ This project is licensed under the [MIT License](LICENSE).
 
 For any questions, issues, or feature requests, feel free to reach out:
 
-- **GitHub Issues:** [Shorts_To_Reels Issues](https://github.com/germanProgq/Shorts_To_Reels/issues)
+- **GitHub Issues:** [Project Issues](https://github.com/germanProgq/Download_Upload_Socials/issues)
 - **Email:** gvinok@duck.com
 
 ---

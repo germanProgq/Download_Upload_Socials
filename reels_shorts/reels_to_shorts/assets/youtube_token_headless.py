@@ -1,7 +1,6 @@
 from google_auth_oauthlib.flow import Flow
-import json
 
-def generate_token(client_secrets_file, token_file="token.json"):
+def generate_token(client_secrets_file="./assets/token/client_secrets.json", token_file="token.json"):
     """
     Perform manual OAuth 2.0 flow for headless environments without launching a browser.
 
@@ -36,3 +35,7 @@ def generate_token(client_secrets_file, token_file="token.json"):
     with open(token_file, "w") as token:
         token.write(credentials.to_json())
         print(f"Token saved to {token_file}")
+
+
+if __name__ == "__main__":
+    generate_token()
