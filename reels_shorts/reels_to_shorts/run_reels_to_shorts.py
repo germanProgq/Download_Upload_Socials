@@ -70,7 +70,8 @@ MAX_DOWNLOAD_WORKERS = min(8, max(2, (os.cpu_count() or 2)))
 REQUEST_TIMEOUT = 10
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks for faster writes
 REELS_TARGET = 20  # desired new downloads per run
-REELS_FETCH_SIZE = REELS_TARGET * 3  # grab more to skip already-downloaded
+# How many reels to request from Instagram; bump this if you often skip existing downloads.
+REELS_FETCH_SIZE = int(os.getenv("REELS_FETCH_SIZE", REELS_TARGET * 10))
 SESSION = requests.Session()
 
 
@@ -102,12 +103,12 @@ def download_instagram_video(task: ReelDownloadTask) -> Optional[str]:
         return None
 
 
-def build_reel_tasks(client, amount: int = REELS_FETCH_LIMIT) -> List[ReelDownloadTask]:
+def build_reel_tasks(client, amount: int = REELS_FETCH_SIZE) -> List[ReelDownloadTask]:
     """
     Fetch reel metadata and build download tasks.
     """
     try:
-        reels = client.reels(amount=REELS_FETCH_SIZE)
+        reels = client.reels(amount=amount)
     except Exception as e:
         logger.error(f"Error fetching reels: {e}")
         return []
@@ -167,7 +168,7 @@ def process_reels(client) -> List[str]:
     """
     logger.info("Processing reels...")
 
-    tasks = build_reel_tasks(client, amount=REELS_FETCH_LIMIT)
+    tasks = build_reel_tasks(client, amount=REELS_FETCH_SIZE)
     if not tasks:
         return []
 
