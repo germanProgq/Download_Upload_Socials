@@ -3,6 +3,9 @@ import sys
 import subprocess
 import logging
 import time
+import re
+import json
+import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Optional, Tuple, List
@@ -65,6 +68,38 @@ REQUEST_TIMEOUT = 10
 FFPROBE_TIMEOUT = 30
 CONCURRENT_FRAGMENT_DOWNLOADS = min(4, MAX_WORKERS)
 SESSION = requests.Session()
+PROCESSED_CACHE_FILE = "processed_shorts.json"
+CAPTION_EMOJIS = ["🚀", "🔥", "✨", "💥", "🎯", "⭐️", "💫", "⚡️", "😎", "🙌"]
+
+
+class YTDlpLogger:
+    """
+    Silence yt_dlp progress spam while still surfacing warnings/errors.
+    """
+
+    def __init__(self):
+        self._logger = logging.getLogger(__name__)
+
+    def debug(self, msg):
+        # Progress messages come through debug; swallow them to avoid UI spam.
+        if isinstance(msg, str) and msg.startswith("[download]"):
+            return
+
+    def warning(self, msg):
+        self._logger.warning(msg)
+
+    def error(self, msg):
+        self._logger.error(msg)
+
+
+def compact_exception(exc: Exception) -> str:
+    """
+    Return a short, single-line description of an exception.
+    """
+    text = str(exc).strip()
+    if not text:
+        return exc.__class__.__name__
+    return text.split("\n", 1)[0]
 
 
 @dataclass
@@ -104,9 +139,13 @@ def get_youtube_shorts(query, max_results=5):
     """
     Retrieves YouTube Shorts URLs based on a search query.
     """
-    search_url = f"https://www.youtube.com/results?search_query={query}&sp=EgkSB3lvdXR1YmUu"
+    from urllib.parse import quote_plus
+
+    encoded_query = quote_plus(query)
+    search_url = f"https://www.youtube.com/results?search_query={encoded_query}&sp=EgkSB3lvdXR1YmUu"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/85.0.4183.102'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/85.0.4183.102',
+        'Accept-Language': 'en-US,en;q=0.9',
     }
     try:
         response = SESSION.get(search_url, headers=headers, timeout=REQUEST_TIMEOUT)
@@ -117,20 +156,66 @@ def get_youtube_shorts(query, max_results=5):
 
     if response.status_code == 200:
         page_content = response.text
-        video_ids = set()
-        while len(video_ids) < max_results:
-            index = page_content.find('/shorts/')
-            if index == -1:
-                break
-            video_id = page_content[index + 8:index + 19]
-            if video_id:
-                video_ids.add(video_id)
-            page_content = page_content[index + 19:]
-
-        for video_id in video_ids:
+        seen_ids = set()
+        matches = re.findall(r'/shorts/([a-zA-Z0-9_-]{11})', page_content)
+        for video_id in matches:
+            if video_id in seen_ids:
+                continue
             video_urls.append(f"https://www.youtube.com/shorts/{video_id}")
+            seen_ids.add(video_id)
+            if len(video_urls) >= max_results:
+                break
     else:
         logger.error(f"Failed to fetch YouTube Shorts page. Status code: {response.status_code}")
+
+    if video_urls:
+        logger.info(f"Found {len(video_urls)} shorts via HTML scrape.")
+        return video_urls
+
+    logger.warning("No shorts found via HTML scrape; falling back to yt_dlp search.")
+    return search_shorts_with_yt_dlp(query, max_results)
+
+
+def search_shorts_with_yt_dlp(query, max_results=5):
+    """
+    Fallback: use yt_dlp's search to fetch short videos (<= 90s) when HTML scraping fails.
+    """
+    video_urls = []
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True,
+        'extract_flat': 'in_playlist',
+        'default_search': 'ytsearch',
+        'noplaylist': True,
+    }
+
+    try:
+        search_term = f"ytsearch{max_results * 3}:{query}"
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(search_term, download=False)
+    except Exception as e:
+        logger.error(f"yt_dlp search failed: {e}")
+        return video_urls
+
+    entries = result.get('entries', []) if result else []
+    seen_ids = set()
+    for entry in entries:
+        video_id = entry.get('id') or extract_video_id(entry.get('url', ''))
+        if not video_id or video_id in seen_ids:
+            continue
+        if entry.get('is_live'):
+            continue
+
+        duration = entry.get('duration')
+        if duration is not None and duration > 90:
+            continue
+
+        seen_ids.add(video_id)
+        video_urls.append(f"https://www.youtube.com/shorts/{video_id}")
+        if len(video_urls) >= max_results:
+            break
+
+    logger.info(f"yt_dlp fallback found {len(video_urls)} video(s).")
     return video_urls
 
 
@@ -157,17 +242,28 @@ def download_youtube_video(video_url):
         },
         'quiet': True,
         'no_warnings': True,
+        'noprogress': True,
+        'progress_with_newline': False,
         'concurrent_fragment_downloads': CONCURRENT_FRAGMENT_DOWNLOADS,
         'retries': 3,
         'merge_output_format': 'mp4',
+        'logger': YTDlpLogger(),
+        'noplaylist': True,
     }
 
     # Try a preferred mp4-first format, then fall back to best available.
     formats_to_try = [
-        'bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/bv*+ba/best',
-        'best'
+        # Prefer mp4 video+audio, cap at 1080p to avoid oddball formats.
+        'bv*[ext=mp4][height<=1080]+ba/best[ext=mp4]/best',
+        # iOS client fallback can help avoid some 403s without PO token noise.
+        'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best',
+        # Fallback to a progressive mp4 if available.
+        'best[ext=mp4]/best',
+        # Ultra-safe legacy mp4 format.
+        '18/best'
     ]
 
+    errors = []
     for fmt in formats_to_try:
         ydl_opts = dict(base_opts)
         ydl_opts['format'] = fmt
@@ -177,8 +273,19 @@ def download_youtube_video(video_url):
                 logger.info(f"Downloaded video to: {output_path} (format: {fmt})")
                 return output_path
             except Exception as e:
-                logger.error(f"Failed to download video {video_id} with format '{fmt}': {e}")
+                short_error = compact_exception(e)
+                errors.append(f"{fmt}: {short_error}")
+                # Clean up any partial file so later retries can succeed.
+                if os.path.exists(output_path):
+                    try:
+                        os.remove(output_path)
+                    except OSError:
+                        pass
+                logger.warning(f"Download attempt for {video_id} using '{fmt}' failed: {short_error}")
 
+    if errors:
+        joined = "; ".join(errors)
+        logger.error(f"Failed to download video {video_id}. Tried formats -> {joined}")
     return None
 
 
@@ -212,6 +319,33 @@ def is_valid_video(video_path):
     except Exception as e:
         logger.error(f"Validation failed for {video_path}: {e}")
         return False
+
+
+def load_processed_shorts():
+    """
+    Load already-processed YouTube IDs to avoid reprocessing.
+    """
+    if not os.path.exists(PROCESSED_CACHE_FILE):
+        return set()
+    try:
+        with open(PROCESSED_CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return set(str(item) for item in data)
+    except Exception as e:
+        logger.warning(f"Failed to read {PROCESSED_CACHE_FILE}: {e}")
+    return set()
+
+
+def save_processed_shorts(processed_ids):
+    """
+    Persist processed YouTube IDs.
+    """
+    try:
+        with open(PROCESSED_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(sorted(processed_ids), f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to save {PROCESSED_CACHE_FILE}: {e}")
 
 
 def adjust_aspect_ratio_ffmpeg(video_path, target_width=1080, target_height=1920):
@@ -279,11 +413,12 @@ def adjust_aspect_ratio_ffmpeg(video_path, target_width=1080, target_height=1920
 def post_to_instagram(client, video_path, caption, dimensions=None):
     """
     Uploads a video to Instagram with the given caption.
+    Returns True on success.
     """
     try:
         if not is_valid_video(video_path):
             logger.error(f"Video {video_path} is invalid or corrupted. Skipping upload.")
-            return
+            return False
 
         width, height = dimensions if dimensions else get_video_dimensions(video_path)
         if width and height:
@@ -294,8 +429,28 @@ def post_to_instagram(client, video_path, caption, dimensions=None):
         logger.info(f"Posted reel to Instagram with caption: '{caption}'")
 
         time.sleep(60)
+        return True
     except Exception as e:
         logger.error(f"Failed to post to Instagram: {e}")
+        return False
+
+
+def cleanup_files(adjusted_path: str):
+    """
+    Delete adjusted and original files to avoid storage bloat.
+    """
+    candidates = [adjusted_path]
+    basename = os.path.basename(adjusted_path)
+    if basename.startswith("adjusted_"):
+        orig = os.path.join(os.path.dirname(adjusted_path), basename.replace("adjusted_", "", 1))
+        candidates.append(orig)
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                logger.info(f"Deleted local file {path} after upload.")
+            except OSError as e:
+                logger.warning(f"Uploaded but could not delete {path}: {e}")
 
 
 def login_instagram():
@@ -322,7 +477,7 @@ def prepare_video(order: int, video_url: str) -> Optional[PreparedVideo]:
     """
     Download, validate, and adjust a single video. Runs safely in threads.
     """
-    logger.info(f"\nProcessing YouTube Short #{order + 1}: {video_url}")
+    logger.info(f"Processing YouTube Short #{order + 1}: {video_url}")
     output_path = download_youtube_video(video_url)
     if not output_path:
         return None
@@ -344,17 +499,35 @@ def main():
         sys.exit(1)
     query = sys.argv[1]
     max_videos = 5
-    youtube_videos = get_youtube_shorts(query, max_videos)
+    processed_ids = load_processed_shorts()
+    if processed_ids:
+        logger.info(f"Loaded {len(processed_ids)} processed short(s) from cache.")
+
+    youtube_videos = get_youtube_shorts(query, max_videos * 2)
     if not youtube_videos:
         logger.error("No YouTube Shorts found for the provided query.")
         sys.exit(1)
+
+    # Filter out already processed shorts
+    pre_filter_count = len(youtube_videos)
+    youtube_videos = [
+        url for url in youtube_videos
+        if extract_video_id(url) not in processed_ids
+    ]
+    if pre_filter_count != len(youtube_videos):
+        logger.info(f"Skipped {pre_filter_count - len(youtube_videos)} already-uploaded short(s) from cache.")
+    youtube_videos = youtube_videos[:max_videos]
+    if not youtube_videos:
+        logger.warning("No new shorts to process after filtering cached uploads.")
+        return
 
     if not os.path.exists(DOWNLOAD_PATH):
         os.makedirs(DOWNLOAD_PATH)
 
     client = login_instagram()
 
-    caption = 'Your caption'  # Replace with your desired caption
+    emoji = random.choice(CAPTION_EMOJIS) if CAPTION_EMOJIS else "✨"
+    caption = f"Subscribe {emoji}"
 
     prepared_videos: List[PreparedVideo] = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="worker") as executor:
@@ -376,9 +549,14 @@ def main():
 
     for prepared in prepared_videos:
         logger.info(f"Posting video to Instagram with caption: '{caption}' from {prepared.video_url}")
-        post_to_instagram(client, prepared.path, caption, prepared.dimensions)
+        uploaded = post_to_instagram(client, prepared.path, caption, prepared.dimensions)
+        if uploaded:
+            vid_id = extract_video_id(prepared.video_url)
+            processed_ids.add(vid_id)
+            save_processed_shorts(processed_ids)
+            cleanup_files(prepared.path)
 
-    logger.info("\nAll tasks completed.")
+    logger.info("All tasks completed.")
 
 
 if __name__ == "__main__":

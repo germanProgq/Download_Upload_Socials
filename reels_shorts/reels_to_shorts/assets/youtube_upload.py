@@ -1,4 +1,5 @@
 import os
+import json
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from googleapiclient.http import MediaFileUpload
@@ -6,6 +7,46 @@ from googleapiclient.errors import HttpError
 
 # Scopes for upload; must match the token generation scripts.
 UPLOAD_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+
+
+class UploadLimitExceeded(RuntimeError):
+    """Raised when the YouTube API reports the daily upload limit is reached."""
+    pass
+
+
+def _extract_error_reason(error: HttpError):
+    """
+    Pull a stable reason code from a Google API HttpError.
+    """
+    try:
+        for detail in error.error_details or []:
+            reason = detail.get("reason")
+            if reason:
+                return reason
+    except Exception:
+        pass
+
+    try:
+        payload = json.loads(error.content.decode("utf-8"))
+        errors = payload.get("error", {}).get("errors", [])
+        if errors:
+            return errors[0].get("reason")
+    except Exception:
+        pass
+
+    text = str(error)
+    for key in ("uploadLimitExceeded", "insufficientPermissions", "youtubeSignupRequired"):
+        if key in text:
+            return key
+    return None
+
+
+def _short_error_text(error: Exception) -> str:
+    text = str(error).strip()
+    if not text:
+        return error.__class__.__name__
+    return text.split("\n", 1)[0]
+
 
 def get_authenticated_service(token_file="token.json"):
     """
@@ -56,6 +97,9 @@ def upload_video(youtube, video_file, title, description, category_id=22, privac
     try:
         response = request.execute()
     except HttpError as e:
+        reason = _extract_error_reason(e)
+        if reason == "uploadLimitExceeded":
+            raise UploadLimitExceeded("YouTube upload limit exceeded for this account.") from e
         message = str(e)
         if e.resp.status == 401 and "youtubeSignupRequired" in message:
             raise RuntimeError(
@@ -101,5 +145,14 @@ def upload_all_videos_in_folder(youtube, folder_path, category_id=22, privacy_st
         print(f"Uploading: {video_file}")
         try:
             upload_video(youtube, video_path, title, description, category_id, privacy_status)
+        except UploadLimitExceeded:
+            print("YouTube upload limit exceeded; stopping remaining uploads to avoid repeated errors.")
+            break
+        except HttpError as e:
+            reason = _extract_error_reason(e)
+            print(f"Failed to upload {video_file}: {_short_error_text(e)}")
+            if reason == "uploadLimitExceeded":
+                print("YouTube upload limit exceeded; stopping remaining uploads to avoid repeated errors.")
+                break
         except Exception as e:
-            print(f"Failed to upload {video_file}: {e}")
+            print(f"Failed to upload {video_file}: {_short_error_text(e)}")

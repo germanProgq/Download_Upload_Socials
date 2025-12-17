@@ -4,3 +4,6 @@ client_secret*
 .venv/
 venv/
 downloads/
+*.log
+__pycache__/
+processed_shorts.json
