@@ -86,9 +86,17 @@ class YTDlpLogger:
             return
 
     def warning(self, msg):
+        # Ignore noisy yt_dlp nsig/android fallback warnings that don't affect success.
+        if isinstance(msg, str):
+            lowered = msg.lower()
+            if "nsig extraction failed" in lowered or "falling back to generic n function search" in lowered:
+                return
         self._logger.warning(msg)
 
     def error(self, msg):
+        if isinstance(msg, str) and "Requested format is not available" in msg:
+            self._logger.warning(msg)
+            return
         self._logger.error(msg)
 
 
@@ -121,6 +129,34 @@ def get_video_dimensions(video_path):
     except Exception as e:
         logger.error(f"Unable to read dimensions for {video_path}: {e}")
         return None, None
+
+
+def has_audio_stream(video_path) -> bool:
+    """
+    Check if the file contains an audio stream.
+    """
+    try:
+        probe = ffmpeg.probe(video_path)
+        return any(stream.get("codec_type") == "audio" for stream in probe.get("streams", []))
+    except Exception as e:
+        logger.error(f"Unable to read audio info for {video_path}: {e}")
+        return False
+
+
+def describe_audio_stream(video_path) -> str:
+    """
+    Return a short description of the first audio stream, or 'none'.
+    """
+    try:
+        probe = ffmpeg.probe(video_path)
+        for stream in probe.get("streams", []):
+            if stream.get("codec_type") == "audio":
+                codec = stream.get("codec_name", "unknown")
+                channels = stream.get("channels", "?")
+                return f"{codec} ({channels} ch)"
+        return "none"
+    except Exception:
+        return "unknown"
 
 
 def extract_video_id(video_url):
@@ -242,6 +278,7 @@ def download_youtube_video(video_url):
         },
         'quiet': True,
         'no_warnings': True,
+        'verbose': False,
         'noprogress': True,
         'progress_with_newline': False,
         'concurrent_fragment_downloads': CONCURRENT_FRAGMENT_DOWNLOADS,
@@ -249,16 +286,24 @@ def download_youtube_video(video_url):
         'merge_output_format': 'mp4',
         'logger': YTDlpLogger(),
         'noplaylist': True,
+        'postprocessors': [
+            {
+                'key': 'FFmpegVideoRemuxer',
+                'preferedformat': 'mp4'
+            }
+        ],
     }
 
     # Try a preferred mp4-first format, then fall back to best available.
     formats_to_try = [
-        # Prefer mp4 video+audio, cap at 1080p to avoid oddball formats.
-        'bv*[ext=mp4][height<=1080]+ba/best[ext=mp4]/best',
-        # iOS client fallback can help avoid some 403s without PO token noise.
-        'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best',
-        # Fallback to a progressive mp4 if available.
-        'best[ext=mp4]/best',
+        # Broad catch-all: best video+audio merged, remux to mp4 after.
+        'bv*+ba/bestvideo+bestaudio/best',
+        # Prefer a progressive mp4 with both audio+video to guarantee sound.
+        'best[ext=mp4][acodec!=none][vcodec!=none]/best[height<=1080][acodec!=none]/best[acodec!=none]',
+        # DASH video+audio capped at 1080p with m4a audio when possible.
+        'bv*[ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best',
+        # Generic DASH video+audio capped at 1080p.
+        'bv*[ext=mp4][height<=1080]+ba/bestvideo[ext=mp4][height<=1080]+bestaudio/best[ext=mp4]/best',
         # Ultra-safe legacy mp4 format.
         '18/best'
     ]
@@ -270,7 +315,17 @@ def download_youtube_video(video_url):
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             try:
                 ydl.download([video_url])
-                logger.info(f"Downloaded video to: {output_path} (format: {fmt})")
+                # Confirm audio is present; if not, retry with next format.
+                if not has_audio_stream(output_path):
+                    logger.warning(f"Downloaded {output_path} with no audio; retrying with next format.")
+                    if os.path.exists(output_path):
+                        try:
+                            os.remove(output_path)
+                        except OSError:
+                            pass
+                    continue
+                audio_desc = describe_audio_stream(output_path)
+                logger.info(f"Downloaded video to: {output_path} (format: {fmt}, audio: {audio_desc})")
                 return output_path
             except Exception as e:
                 short_error = compact_exception(e)
@@ -351,7 +406,7 @@ def save_processed_shorts(processed_ids):
 def adjust_aspect_ratio_ffmpeg(video_path, target_width=1080, target_height=1920):
     """
     Adjusts the video's aspect ratio to 9:16 using FFmpeg.
-    Crops and resizes the video to fit the target aspect ratio and resolution.
+    Crops and resizes the video to fit the target aspect ratio and resolution, preserving audio when present.
     """
     logger.info(f"Adjusting aspect ratio for {video_path}")
 
@@ -385,12 +440,15 @@ def adjust_aspect_ratio_ffmpeg(video_path, target_width=1080, target_height=1920
         x_crop = (scale_width - target_width) // 2
         y_crop = (scale_height - target_height) // 2
 
-        (
-            ffmpeg
-            .input(video_path)
-            .filter('scale', scale_width, scale_height)
-            .filter('crop', target_width, target_height, x_crop, y_crop)
-            .output(
+        src = ffmpeg.input(video_path)
+        video = src.video.filter('scale', scale_width, scale_height).filter('crop', target_width, target_height, x_crop, y_crop)
+        audio = getattr(src, "audio", None)
+
+        # If audio exists, include it; otherwise render video only.
+        if audio is not None:
+            stream = ffmpeg.output(
+                video,
+                audio,
                 output_path,
                 vcodec='libx264',
                 acodec='aac',
@@ -399,9 +457,18 @@ def adjust_aspect_ratio_ffmpeg(video_path, target_width=1080, target_height=1920
                 audio_bitrate='128k',
                 strict='experimental'
             )
-            .overwrite_output()
-            .run(quiet=True)
-        )
+        else:
+            stream = ffmpeg.output(
+                video,
+                output_path,
+                vcodec='libx264',
+                pix_fmt='yuv420p',
+                video_bitrate='5M',
+                strict='experimental'
+            )
+
+        stream = stream.overwrite_output()
+        ffmpeg.run(stream, quiet=True)
 
         logger.info(f"Adjusted video saved to {output_path}")
         return output_path, (target_width, target_height)
