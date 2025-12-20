@@ -7,3 +7,4 @@ downloads/
 *.log
 __pycache__/
 processed_shorts.json
+processed_reels.json

@@ -1,11 +1,13 @@
-import os
-import sys
+import inspect
 import json
-import random
-import platform
 import logging
+import os
+import platform
+import random
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
 import requests
@@ -19,6 +21,9 @@ from assets.youtube_upload import (
 )
 from assets.youtube_token_desktop import generate_token as generate_token_desktop
 from assets.youtube_token_headless import generate_token as generate_token_headless
+
+BASE_DIR = Path(__file__).resolve().parent
+LOG_FILE = BASE_DIR / "app.log"
 
 
 class ColorFormatter(logging.Formatter):
@@ -41,7 +46,7 @@ def configure_logging():
     logger.setLevel(logging.INFO)
 
     # File handler (detailed)
-    fh = logging.FileHandler("app.log")
+    fh = logging.FileHandler(LOG_FILE)
     fh.setLevel(logging.INFO)
     fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(threadName)s - %(message)s'))
 
@@ -66,11 +71,11 @@ logger = configure_logging()
 
 load_dotenv()
 
-DOWNLOAD_PATH = os.path.join('downloads')
+DOWNLOAD_DIR = BASE_DIR / "downloads"
 INSTAGRAM_USERNAME = os.getenv('INSTAGRAM_USERNAME')
 INSTAGRAM_PASSWORD = os.getenv('INSTAGRAM_PASSWORD')
-CLIENT_SECRETS_FILE = "./assets/token/client_secrets.json"
-TOKEN_FILE = "token.json"
+CLIENT_SECRETS_FILE = BASE_DIR / "assets" / "token" / "client_secrets.json"
+TOKEN_FILE = BASE_DIR / "token.json"
 IS_WINDOWS = platform.system().lower().startswith("win")
 MAX_DOWNLOAD_WORKERS = min(8, max(2, (os.cpu_count() or 2)))
 REQUEST_TIMEOUT = 10
@@ -79,7 +84,8 @@ REELS_TARGET = 20  # desired new downloads per run
 # How many reels to request per API call; script keeps paging until it finds enough new ones.
 REELS_BATCH_SIZE = int(os.getenv("REELS_BATCH_SIZE", 50))
 SESSION = requests.Session()
-PROCESSED_CACHE_FILE = "processed_reels.json"
+PROCESSED_CACHE_FILE = BASE_DIR / "processed_reels.json"
+SESSION_FILE = BASE_DIR / "session.json"
 CAPTION_EMOJIS = ["🚀", "🔥", "✨", "💥", "🎯", "⭐️", "💫", "⚡️", "😎", "🙌"]
 
 
@@ -115,7 +121,7 @@ def load_processed_reels() -> Set[str]:
     """
     Return the set of media_pks already uploaded.
     """
-    if not os.path.exists(PROCESSED_CACHE_FILE):
+    if not PROCESSED_CACHE_FILE.exists():
         return set()
     try:
         with open(PROCESSED_CACHE_FILE, "r", encoding="utf-8") as f:
@@ -138,7 +144,77 @@ def save_processed_reels(processed: Set[str]):
         logger.error(f"Failed to save {PROCESSED_CACHE_FILE}: {e}")
 
 
-def build_reel_tasks(client, processed_ids: Set[str]) -> List[ReelDownloadTask]:
+def _safe_client_call(method, params):
+    try:
+        return method(**params)
+    except TypeError as e:
+        try:
+            allowed = inspect.signature(method).parameters
+        except (TypeError, ValueError):
+            raise e
+        filtered = {key: value for key, value in params.items() if key in allowed}
+        if filtered == params:
+            raise e
+        return method(**filtered)
+
+
+def _is_reel_media(media) -> bool:
+    product_type = getattr(media, "product_type", None)
+    if product_type:
+        return product_type == "clips"
+    media_type = getattr(media, "media_type", None)
+    return str(media_type) == "2"
+
+
+def resolve_source_user_id(client) -> Tuple[Optional[str], Optional[str]]:
+    source_username = os.getenv("INSTAGRAM_SOURCE_USERNAME") or INSTAGRAM_USERNAME
+    if source_username:
+        try:
+            return str(client.user_id_from_username(source_username)), source_username
+        except Exception as e:
+            logger.warning(
+                f"Failed to resolve user id for @{source_username}: {e}. Falling back to authenticated user."
+            )
+
+    user_id = getattr(client, "user_id", None)
+    if user_id:
+        username = getattr(client, "username", None) or source_username
+        if not username:
+            try:
+                info = client.account_info()
+                username = getattr(info, "username", None)
+            except Exception:
+                username = None
+        if username:
+            logger.info(f"Using authenticated user @{username} as reel source.")
+        else:
+            logger.info("Using authenticated user id as reel source.")
+        return str(user_id), username
+
+    return None, source_username
+
+
+def resolve_reels_method(client, source_user_id: Optional[str]):
+    if source_user_id:
+        for method_name in ("user_clips", "user_clips_v1"):
+            method = getattr(client, method_name, None)
+            if callable(method):
+                return method_name, method
+        method = getattr(client, "user_medias", None)
+        if callable(method):
+            return "user_medias", method
+    method = getattr(client, "reels", None)
+    if callable(method):
+        return "reels", method
+    return None, None
+
+
+def build_reel_tasks(
+    client,
+    processed_ids: Set[str],
+    source_user_id: Optional[str],
+    source_username: Optional[str],
+) -> List[ReelDownloadTask]:
     """
     Fetch reel metadata and build download tasks.
     """
@@ -148,17 +224,41 @@ def build_reel_tasks(client, processed_ids: Set[str]) -> List[ReelDownloadTask]:
     seen_pks = set()
     last_media_pk = 0
     batch = 0
+    use_pagination = False
+
+    method_name, method = resolve_reels_method(client, source_user_id)
+    if not method:
+        logger.error("No supported Instagram reel source method available.")
+        return []
+
+    if method_name in ("user_clips", "user_clips_v1", "user_medias"):
+        target = f"@{source_username}" if source_username else "the target account"
+        logger.info(f"Fetching reels for {target} via {method_name}...")
+    else:
+        logger.info("Fetching reels from the reels feed...")
+        use_pagination = True
 
     while len(tasks) < REELS_TARGET:
         try:
-            reels = client.reels(amount=REELS_BATCH_SIZE, last_media_pk=last_media_pk)
+            params = {"amount": REELS_BATCH_SIZE}
+            if method_name in ("user_clips", "user_clips_v1", "user_medias"):
+                user_id_value = int(source_user_id) if source_user_id and source_user_id.isdigit() else source_user_id
+                params["user_id"] = user_id_value
+            if use_pagination and last_media_pk:
+                params["last_media_pk"] = last_media_pk
+            reels = _safe_client_call(method, params)
+            if method_name == "user_medias":
+                reels = [media for media in reels or [] if _is_reel_media(media)]
         except Exception as e:
             logger.error(f"Error fetching reels (batch {batch + 1}): {e}")
             break
 
         if not reels:
             if batch == 0:
-                logger.warning("No reels found.")
+                if method_name in ("user_clips", "user_clips_v1", "user_medias") and source_username:
+                    logger.warning(f"No reels found for @{source_username}.")
+                else:
+                    logger.warning("No reels found.")
             else:
                 logger.info("No more reels returned by Instagram; stopping.")
             break
@@ -178,10 +278,11 @@ def build_reel_tasks(client, processed_ids: Set[str]) -> List[ReelDownloadTask]:
             seen_pks.add(media_pk)
             new_seen_this_batch += 1
 
-            try:
-                last_media_pk = int(str(media_pk))
-            except Exception:
-                pass
+            if use_pagination:
+                try:
+                    last_media_pk = int(str(media_pk))
+                except Exception:
+                    pass
 
             video_url = getattr(reel, "video_url", None)
             if not video_url:
@@ -197,7 +298,7 @@ def build_reel_tasks(client, processed_ids: Set[str]) -> List[ReelDownloadTask]:
                 continue
 
             output_filename = f"{media_pk}.mp4"
-            output_path = os.path.join(DOWNLOAD_PATH, output_filename)
+            output_path = str(DOWNLOAD_DIR / output_filename)
 
             if str(media_pk) in processed_ids:
                 skipped_processed += 1
@@ -221,6 +322,8 @@ def build_reel_tasks(client, processed_ids: Set[str]) -> List[ReelDownloadTask]:
 
         if len(tasks) >= REELS_TARGET:
             break
+        if not use_pagination:
+            break
 
         if new_seen_this_batch == 0:
             logger.info("No new reels beyond what was already processed; stopping pagination.")
@@ -240,7 +343,8 @@ def process_reels(client, processed_ids: Set[str]) -> List[Tuple[str, str]]:
     """
     logger.info("Processing reels...")
 
-    tasks = build_reel_tasks(client, processed_ids)
+    source_user_id, source_username = resolve_source_user_id(client)
+    tasks = build_reel_tasks(client, processed_ids, source_user_id, source_username)
     if not tasks:
         return []
 
@@ -267,17 +371,17 @@ def ensure_youtube_token():
     """
     Ensure token.json exists; generate it with the right OAuth flow per platform.
     """
-    if os.path.exists(TOKEN_FILE):
+    if TOKEN_FILE.exists():
         return
 
     logger.info(f"{TOKEN_FILE} not found. Generating a new token...")
     try:
         if IS_WINDOWS:
             logger.info("Launching desktop OAuth flow for YouTube...")
-            generate_token_desktop(CLIENT_SECRETS_FILE, TOKEN_FILE)
+            generate_token_desktop(str(CLIENT_SECRETS_FILE), str(TOKEN_FILE))
         else:
             logger.info("Launching headless OAuth flow for YouTube...")
-            generate_token_headless(CLIENT_SECRETS_FILE, TOKEN_FILE)
+            generate_token_headless(str(CLIENT_SECRETS_FILE), str(TOKEN_FILE))
         logger.info(f"Token generated and saved to {TOKEN_FILE}.")
     except Exception as e:
         logger.error(f"Failed to generate token: {e}")
@@ -294,19 +398,19 @@ def login_instagram():
 
     client = Client()
     try:
-        if os.path.exists("session.json"):
-            client.load_settings("session.json")
+        if SESSION_FILE.exists():
+            client.load_settings(str(SESSION_FILE))
             client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
         else:
             client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            client.dump_settings("session.json")
+            client.dump_settings(str(SESSION_FILE))
         logger.info("Logged in to Instagram successfully.")
         return client
     except LoginRequired:
         logger.error("Session expired. Re-attempting login.")
         try:
             client.login(INSTAGRAM_USERNAME, INSTAGRAM_PASSWORD)
-            client.dump_settings("session.json")
+            client.dump_settings(str(SESSION_FILE))
             return client
         except Exception as e:
             logger.error(f"Re-login failed: {e}")
@@ -317,8 +421,7 @@ def login_instagram():
 
 
 def main():
-    if not os.path.exists(DOWNLOAD_PATH):
-        os.makedirs(DOWNLOAD_PATH)
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     processed_ids = load_processed_reels()
     if processed_ids:
@@ -334,7 +437,7 @@ def main():
         return
 
     try:
-        youtube = get_authenticated_service()
+        youtube = get_authenticated_service(token_file=str(TOKEN_FILE))
     except Exception as e:
         logger.error(f"Error creating YouTube client: {e}")
         return

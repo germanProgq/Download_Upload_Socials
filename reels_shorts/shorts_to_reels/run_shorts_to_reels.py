@@ -13,6 +13,7 @@ from typing import Optional, Tuple, List
 import requests
 from instagrapi import Client
 import yt_dlp as youtube_dl
+from yt_dlp.version import __version__ as ytdlp_version
 from dotenv import load_dotenv
 import ffmpeg
 
@@ -70,12 +71,14 @@ CONCURRENT_FRAGMENT_DOWNLOADS = min(4, MAX_WORKERS)
 SESSION = requests.Session()
 PROCESSED_CACHE_FILE = "processed_shorts.json"
 CAPTION_EMOJIS = ["🚀", "🔥", "✨", "💥", "🎯", "⭐️", "💫", "⚡️", "😎", "🙌"]
+MIN_YTDLP_VERSION = "2025.12.8"
 
 
 class YTDlpLogger:
     """
     Silence yt_dlp progress spam while still surfacing warnings/errors.
     """
+    _once_tokens = set()
 
     def __init__(self):
         self._logger = logging.getLogger(__name__)
@@ -87,10 +90,26 @@ class YTDlpLogger:
 
     def warning(self, msg):
         # Ignore noisy yt_dlp nsig/android fallback warnings that don't affect success.
-        if isinstance(msg, str):
-            lowered = msg.lower()
-            if "nsig extraction failed" in lowered or "falling back to generic n function search" in lowered:
-                return
+        if not isinstance(msg, str):
+            self._logger.warning(msg)
+            return
+
+        lowered = msg.lower()
+        if "nsig extraction failed" in lowered or "falling back to generic n function search" in lowered:
+            return
+
+        # The new yt-dlp releases log an informational warning about missing JS runtimes.
+        if "javascript runtime" in lowered:
+            token = "js-runtime"
+            if token not in self._once_tokens:
+                self._once_tokens.add(token)
+                self._logger.info(msg)
+            return
+
+        # SABR streaming warnings are benign for Shorts downloads; drop them.
+        if "sabr streaming" in lowered:
+            return
+
         self._logger.warning(msg)
 
     def error(self, msg):
@@ -108,6 +127,31 @@ def compact_exception(exc: Exception) -> str:
     if not text:
         return exc.__class__.__name__
     return text.split("\n", 1)[0]
+
+
+def _version_tuple(ver_str: str) -> Tuple[int, ...]:
+    """
+    Convert a version string like '2025.12.8' into a tuple of ints for comparison.
+    """
+    parts = re.findall(r"\d+", ver_str)
+    return tuple(int(p) for p in parts) if parts else (0,)
+
+
+def ensure_ytdlp_version():
+    """
+    Bail out early if yt-dlp is too old to fetch Shorts reliably.
+    """
+    current = _version_tuple(ytdlp_version)
+    minimum = _version_tuple(MIN_YTDLP_VERSION)
+    if current < minimum:
+        logger.error(
+            f"yt-dlp {ytdlp_version} is too old and will fail on Shorts (HTTP 403 / missing formats). "
+            f"Please upgrade to >= {MIN_YTDLP_VERSION}: pip install -U yt-dlp"
+        )
+        sys.exit(1)
+
+
+ensure_ytdlp_version()
 
 
 @dataclass
